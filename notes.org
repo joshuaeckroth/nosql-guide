@@ -1,0 +1,253 @@
+
+run through example with 2 projects; how different DBs would be used;
+and which might be best to use
+
+* MapReduce
+  - divide and conquer
+  - "map": master node takes input, divides it (perhaps recursively),
+    worker nodes process subset, return results
+    - can be done in parallel
+  - "reduce": collect results from map steps, aggregate somehow; also
+    given partial reduce results from other calls
+    - if reduce function is associative, subsets can be done in parallel
+
+* CAP theorem
+  - 2000, Eric Brewer
+  - Consistency: all nodes see same data at same time
+  - Availability: always return a response
+  - Partition tolerance: continues to operate if nodes fail or message
+    loss, or nodes are added/removed
+  - theorem: pick 2, cannot get all 3
+  - i.e., if you want to scale up (A+P), gotta lose consistency (C)
+
+* ACID
+  - regarding a transaction
+  - Atomicity: all or nothing
+  - Consistency: transaction does not violate foreign key checks, other constraints
+  - Isolation: executing many transactions concurrently is same as serially; they don't interact
+  - Durability: completed transaction remains after power loss, etc. (i.e., written to disk)
+  - hard to achieve if transaction spans nodes
+  - hard to achieve if data is spread across nodes
+  - hard to achieve without locking (which is detrimental to performance)
+  - RDBMS are typically ACID-compliant; NoSQL typically aren't
+  - give up C+I for availability, graceful degradation, and performance
+  - maybe even give up D for extra performance
+
+* BASE (cf. ACID)
+  - Basically Available, Soft state, Eventually consistent
+  - Basically available: usually works
+  - Soft state: not always consistent
+  - Eventually consistent: reads across all nodes will eventually
+    agree (if no updates happen in the meantime)
+
+* Key-Value database
+** Properties
+   - can only retrieve by a unique key
+   - just get back a value; your client code interprets the value (db sees it as a blob)
+   - performance is uniform and fast
+   - might have access to lists and sets and integers, etc.
+** Implementations
+*** Project Voldemort
+    - typical, look at its API:
+      - get(key) --- returns a value
+      - put(key, value)
+      - delete(key)
+    - used at LinkedIn
+*** Redis
+    - master-slave replication (all updates saved to a log, then copied to slaves)
+    - slaves can be written to, master needs to grab those changes
+    - if master fails, a slave becomes the master; might lose recent data that only master had
+    - in-memory but updtaes can be logged to an append-only file, which is periodically rewritten (compacted)
+*** Memcached
+    - in-memory cache (never saved to disk)
+    - when full, purges by LRU
+    - Facebook apparently has terabytes of "in-memory cache"
+* Document database
+** Properties
+   - also retrieved by key
+   - datastructures are stored (dictionaries & lists, each can be nested in the other)
+   - can store a list of keys, and retrieve those recursively, in one request
+   - each doc (identified by key) might have revisions
+   - good for syncing (copy newer revisions; propagate deletes)
+** Implementations
+*** MongoDB
+    - not good on big data, but supports map-reduce
+    - no fine-grained security
+    - easy sharding (data subsets stored in separate machines; not replicated; no joins; painful in RDBMS)
+    - has some query support (find based on field values, plus some operators like < > etc.)
+    - can add indexes
+*** CouchDB
+    - create "views" of the data
+    - views are updated when items are updated
+    - if one doc is changed by two clients, two revisions are saved; merging is left to the client
+    - good for offline usage; changes are sync'ed later (again, no default merging)
+    - can be considered ACID compliant w.r.t. to how it saves to disk
+*** Riak
+    - write is successful if some number of servers confirm it
+    - "Riak is used by thousands of companies worldwide, including over 25% of the Fortune 50." (Wikipedia)
+* Column-Family Store
+** Properties
+   - key identifies a row in a table, which is part of 1+ column families
+   - each column family can have multiple columns
+   - values are timestamped (multiple versions of a value can be kept)
+** Implementations
+*** Cassandra
+    - api:
+      - get(table, key, columnName)
+      - insert(table, key, rowMutation)
+      - delete(table, key, columnName)
+    - write is successful if some number of servers confirm it
+    - tunable consistency/performance tradeoff
+    - most efficient nosql db
+    - does not support joins or subqueries
+    - decentralized, no masters
+    - map-reduce support
+* Graph database
+** Properties
+   - each item has arbitrary relations with others
+   - each item has various properties
+   - can "walk" the graph according to these relations
+** Implementations
+*** Neo4J
+*** HyperGraphDB
+* Object database
+** Properties
+   - essentially, persisting live objects
+   - basic query support, e.g., find objects of this class, etc.
+   - suffer from poor indexing, poor search, memory/disk fragmentation
+
+key points:
+http://www.slideshare.net/andraz/sql-or-nosql-that-is-the-question (slide 86)
+- flexible schemas are very useful when requirements change
+- denormalization is the way to scale
+- client code has more control, but also is required to
+
+http://blogs.the451group.com/information_management/2013/06/10/updated-database-landscape-map-june-2013/
+
+Search trends:
+http://www.google.com/trends/explore?q=nosql#q=nosql&geo=US&date=1%2F2009%2049m&cmpt=q
+
+Job trends:
+http://www.indeed.com/jobtrends?q=sql%2C+nosql&l=
+
+Job trends growth:
+http://www.indeed.com/jobtrends?q=sql%2C+nosql&l=&relative=1
+
+- Do you expect your database schemas to change often?
+- Do you expect to store many terrabytes / petabytes of data?
+- Do you expect to repeatedly process many terrabytes / petabytes of data?
+- Do you require syncing among many servers and/or mobile devices?
+- Does your data have myriad ad hoc relations?
+- Do you require strong consistency?
+- Do you require maximum service availability?
+- Do you require extreme data access speed?
+- Do you expect significantly more reads than writes?
+
+
+http://highscalability.com/blog/2013/5/1/myth-eric-brewer-on-why-banks-are-base-not-acid-availability.html
+
+Myth: Money is important, so banks must use transactions to keep money
+safe and consistent, right?
+
+Reality: Banking transactions are inconsistent, particularly for
+ATMs. ATMs are designed to have a normal case behaviour and a
+partition mode behaviour. In partition mode Availability is chosen
+over Consistency.
+
+Why? 1) Availability correlates with revenue and consistency generally
+does not. 2) Historically there was never an idea of perfect
+communication so everything was partitioned.
+
+Your ATM transaction must go through so Availability is more important
+than consistency. If the ATM is down then you aren’t making money. If
+you can fudge the consistency and stay up and compensate for other
+mistakes (which are rare), you'll make more money. That’s the space
+most enterprises find themselves so BASE is more popular than it used
+to be.
+
+This is not a new problem for the financial industry. They’ve never
+had consistency because historically they’ve never had perfect
+communication. Instead, the financial industry depends on
+auditing. What accounts for the consistency of bank data is not the
+consistency of its databases but the fact that everything is written
+down twice and sorted out later using a permanent and unalterable
+record that is reconciled later. The idea of financial compensation
+for errors is an idea built deeply into the financial system.
+
+During the Renaissance, when the modern banking system started to take
+shape, everything was partitioned. If letters, your data, are
+transported by horse or over ships, then it's likely you data will
+have a very low consistency, yet they still had an amazingly rich and
+successful banking system. Transactions were unnecessary.
+
+ATMs, for example, chose commutative operations like increment and
+decrement, so the order in which the operations are applied doesn’t
+matter. They are reorderable and can be made consistent later. If an
+ATM is disconnected from the network and when the partition eventually
+heals, the ATM sends sends a list of operations to the bank and the
+end balance will still be correct. The issue is obviously you might
+withdraw more money than you have so the end result might be
+consistent, but negative, which can’t be compensated for by asking for
+the money back, so instead, the bank will reward you with an overdraft
+penalty.
+
+The hidden philosophy is that you are trying to bound and manage your
+risk, yet still have all operations available. In the ATM case this
+would be a limit on the maximum amount of money you can take out at
+any one time. It’s not that big of a risk. ATMs are profitable so the
+occasional loss is just the risk of doing business.
+
+Consistency it turns out is not the Holy Grail. What trumps
+consistency is:
+
+    Auditing
+    Risk Management
+    Availability
+
+In a post-internet world where write availability is key the real
+world looks more like weak consistency + delayed exceptions +
+compensation rather than a mistake free world of perfect communication
+and transactions. Just like the old days, but now you have far more
+options on the ACID <---> CAP spectrum.
+
+
+* Origin
+
+http://www.christof-strauch.de/nosqldbs.pdf (page 6)
+
+The term NoSQL was first used in 1998 for a relational database that
+omitted the use of SQL (see [ Str10 ]).  The term was picked up again
+in 2009 and used for conferences of advocates of non-relational
+databases such as Last.fm developer Jon Oskarsson, who organized the
+NoSQL meetup in San Francisco (cf. [ Eva09a ]).  A blogger, often
+referred to as having made the term popular is Rackspace employee Eric
+Evans who later described the ambition of the NoSQL movement as “the
+whole point of seeking alternatives is that you need to solve a
+problem that relational databases are a bad fit for” (cf. [ Eva09b ]).
+
+(page 8)
+
+The truth is that you don’t need ACID for Facebook status updates or
+tweets or Slashdots comments. So long as your business and
+presentation layers can robustly deal with inconsistent data, it
+doesn’t really matter. It isn’t ideal, obviously, and preferrably
+[sic!] you see zero data loss, inconsistency, or service interruption,
+however accepting data loss or inconsistency (even just temporary) as
+a possibility, breaking free of by far the biggest scaling “hindrance”
+of the RDBMS world, can yield dramatic flexibility. [...]  This is the
+case for many social media sites: data integrity is largely optional,
+and the expense to guarantee it is an unnecessary expenditure. When
+you yield pennies for ad clicks after thousands of users and hundreds
+of thousands of transactions, you start to look to optimize.”  (cf. [
+For10 ])
+
+(page 26)
+
+If I need reporting, I won’t be using any NoSQL. If I need caching,
+I’ll probably use Tokyo Tyrant. If I need ACIDity, I won’t use
+NoSQL. If I need a ton of counters, I’ll use Redis. If I need
+transactions, I’ll use Postgres. If I have a ton of a single type of
+documents, I’ll probably use Mongo. If I need to write 1 billion
+objects a day, I’d probably use Voldemort. If I need full text search,
+I’d probably use Solr. If I need full text search of volatile data,
+I’d probably use Sphinx.”
